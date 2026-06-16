@@ -1,0 +1,4 @@
+/rally
+/tmp
+*.test
+*.out
