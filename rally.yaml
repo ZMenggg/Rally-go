@@ -1,0 +1,29 @@
+# Rally.yaml — 多 VPS 带宽聚合代理配置
+
+bind: ":1080"           # SOCKS5 统一出口
+balance: roundrobin     # 负载均衡策略
+
+log:
+  level: info
+
+# VPS 后端列表
+vps:
+  - name: dr1
+    type: hysteria2
+    server: 192.0.2.1
+    port: 23872
+    password: "your-password"
+    down_mbps: 500
+    up_mbps: 50
+
+  - name: dr2
+    type: hysteria2
+    server: 192.0.2.2
+    port: 44705
+    password: "your-password"
+
+  - name: hd
+    type: hysteria2
+    server: 192.0.2.3
+    port: 19996
+    password: "your-password"
