@@ -37,6 +37,9 @@ type VPS struct {
 	// Flow control for VLESS (e.g. "xtls-rprx-vision")
 	Flow string `yaml:"flow,omitempty" json:"flow,omitempty"`
 
+	// Insecure disables TLS certificate verification (for self-signed certs)
+	Insecure bool `yaml:"insecure,omitempty" json:"insecure,omitempty"`
+
 	// Bandwidth in Mbps (optional, Hysteria2 specific)
 	DownMbps int `yaml:"down_mbps,omitempty" json:"down_mbps,omitempty"`
 	UpMbps   int `yaml:"up_mbps,omitempty"   json:"up_mbps,omitempty"`

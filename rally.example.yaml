@@ -15,6 +15,7 @@ vps:
     down_mbps: 500
     up_mbps: 50
     enabled: true
+    insecure: true
 
   - name: vps-2
     type: hysteria2
@@ -25,3 +26,4 @@ vps:
     down_mbps: 500
     up_mbps: 50
     enabled: true
+    insecure: true

@@ -251,7 +251,7 @@ func (r *Runner) startHysteria2(vps config.VPS) (proxy.ConnProvider, error) {
 		Auth:       vps.Password,
 		TLSConfig: hyclient.TLSConfig{
 			ServerName:         tlsServerName,
-			InsecureSkipVerify: false,
+			InsecureSkipVerify: vps.Insecure,
 		},
 		BandwidthConfig: hyclient.BandwidthConfig{
 			MaxTx: uint64(vps.UpMbps) * 1_000_000 / 8,
