@@ -6,6 +6,12 @@
 *.out
 .DS_Store
 
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
 # Config with real credentials
 rally.yaml
 *.local.yaml
