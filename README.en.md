@@ -72,13 +72,15 @@ vps:
 # Native
 rally run -c rally.yaml
 
-# With Web UI (default :9090)
+# With Web UI (default 127.0.0.1:9090)
 rally run -c rally.yaml --web
 
-# Docker
+# Docker (set RALLY_WEB_TOKEN when exposing the Web UI)
 docker run -d -p 1080:1080 -p 9090:9090 \
+  -e RALLY_WEB_TOKEN="change-me" \
   -v ./rally.yaml:/etc/rally.yaml \
-  ghcr.io/zmenggg/rally-go:latest
+  ghcr.io/zmenggg/rally-go:latest \
+  run -c /etc/rally.yaml --web :9090
 ```
 
 ### 3. Use
@@ -88,6 +90,10 @@ curl -x socks5://127.0.0.1:1080 https://www.youtube.com/watch?v=...
 ```
 
 Open http://localhost:9090 for the Web dashboard.
+
+The Web UI binds to localhost by default. To listen on `:9090` or another
+public address, set `RALLY_WEB_TOKEN` and authenticate with Basic Auth
+(any username, token as password) or `Authorization: Bearer <token>`.
 
 ## Configuration Reference
 

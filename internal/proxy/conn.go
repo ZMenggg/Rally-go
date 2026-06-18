@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	sscore "github.com/shadowsocks/go-shadowsocks2/core"
@@ -68,8 +70,10 @@ func socks5ClientHandshake(conn net.Conn, targetAddr string) error {
 	if err != nil {
 		return fmt.Errorf("split target address: %w", err)
 	}
-	port := uint16(0)
-	fmt.Sscanf(portStr, "%d", &port)
+	port, err := parsePort(portStr)
+	if err != nil {
+		return fmt.Errorf("parse target port: %w", err)
+	}
 
 	var req []byte
 	req = append(req, 0x05, 0x01, 0x00) // ver, cmd=CONNECT, rsv
@@ -171,8 +175,11 @@ func (p *ShadowsocksProvider) Dial(addr string) (net.Conn, error) {
 		conn.Close()
 		return nil, fmt.Errorf("split target address: %w", err)
 	}
-	port := uint16(0)
-	fmt.Sscanf(portStr, "%d", &port)
+	port, err := parsePort(portStr)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("parse target port: %w", err)
+	}
 
 	var header []byte
 	ip := net.ParseIP(host)
@@ -267,8 +274,11 @@ func (p *TrojanProvider) Dial(addr string) (net.Conn, error) {
 		tlsConn.Close()
 		return nil, fmt.Errorf("split target address: %w", err)
 	}
-	port := uint16(0)
-	fmt.Sscanf(portStr, "%d", &port)
+	port, err := parsePort(portStr)
+	if err != nil {
+		tlsConn.Close()
+		return nil, fmt.Errorf("parse target port: %w", err)
+	}
 
 	ip := net.ParseIP(host)
 	if ip != nil {
@@ -348,8 +358,11 @@ func (p *VLESSProvider) Dial(addr string) (net.Conn, error) {
 		conn.Close()
 		return nil, fmt.Errorf("split target address: %w", err)
 	}
-	port := uint16(0)
-	fmt.Sscanf(portStr, "%d", &port)
+	port, err := parsePort(portStr)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("parse target port: %w", err)
+	}
 
 	// Build VLESS request:
 	// [16-byte UUID] [ver=0] [cmd=1 TCP] [portBE] [atyp] [addr...]
@@ -409,54 +422,46 @@ func (p *VLESSProvider) Dial(addr string) (net.Conn, error) {
 // into a 16-byte array.
 func parseUUID(s string) ([16]byte, error) {
 	var uuid [16]byte
+	hex := s
 	if len(s) == 36 {
-		// Standard format: 8-4-4-4-12
-		for i, c := range s {
-			if c == '-' {
-				continue
-			}
-			if i >= 36 {
-				break
-			}
-			// Calculate position without hyphens
-			pos := i
-			if i > 8 {
-				pos--
-			}
-			if i > 13 {
-				pos--
-			}
-			if i > 18 {
-				pos--
-			}
-			if i > 23 {
-				pos--
-			}
-			if pos >= 32 {
-				break
-			}
-			uuid[pos/2] = uuid[pos/2]<<4 | unhex(c)
+		if s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
+			return uuid, fmt.Errorf("invalid UUID format")
 		}
-		return uuid, nil
+		hex = strings.ReplaceAll(s, "-", "")
 	}
-	// 32 hex chars without hyphens
-	if len(s) == 32 {
-		for i := 0; i < 32; i += 2 {
-			uuid[i/2] = unhex(rune(s[i]))<<4 | unhex(rune(s[i+1]))
+	if len(hex) != 32 {
+		return uuid, fmt.Errorf("invalid UUID length: %d", len(s))
+	}
+	for i := 0; i < 32; i += 2 {
+		hi, ok := unhex(rune(hex[i]))
+		if !ok {
+			return uuid, fmt.Errorf("invalid UUID hex at position %d", i)
 		}
-		return uuid, nil
+		lo, ok := unhex(rune(hex[i+1]))
+		if !ok {
+			return uuid, fmt.Errorf("invalid UUID hex at position %d", i+1)
+		}
+		uuid[i/2] = hi<<4 | lo
 	}
-	return uuid, fmt.Errorf("invalid UUID length: %d", len(s))
+	return uuid, nil
 }
 
-func unhex(c rune) byte {
+func parsePort(portStr string) (uint16, error) {
+	port, err := strconv.ParseUint(portStr, 10, 16)
+	if err != nil {
+		return 0, err
+	}
+	return uint16(port), nil
+}
+
+func unhex(c rune) (byte, bool) {
 	switch {
 	case '0' <= c && c <= '9':
-		return byte(c - '0')
+		return byte(c - '0'), true
 	case 'a' <= c && c <= 'f':
-		return byte(c - 'a' + 10)
+		return byte(c - 'a' + 10), true
 	case 'A' <= c && c <= 'F':
-		return byte(c - 'A' + 10)
+		return byte(c - 'A' + 10), true
 	}
-	return 0
+	return 0, false
 }

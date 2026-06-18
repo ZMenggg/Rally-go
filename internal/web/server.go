@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -25,6 +27,7 @@ var frontendFS embed.FS
 type Server struct {
 	cfg        *config.Config
 	configPath string
+	authToken  string
 	mu         sync.RWMutex
 
 	runnerStatus func() []BackendStatus
@@ -38,6 +41,7 @@ func New(cfg *config.Config, configPath string) *Server {
 	return &Server{
 		cfg:        cfg,
 		configPath: configPath,
+		authToken:  os.Getenv("RALLY_WEB_TOKEN"),
 	}
 }
 
@@ -79,7 +83,15 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/node/toggle", s.handleNodeToggle)
 	mux.HandleFunc("/", s.handleStatic)
 
-	s.srv = &http.Server{Addr: addr, Handler: mux}
+	handler := http.Handler(mux)
+	if s.authToken == "" && isPublicAddr(addr) {
+		return fmt.Errorf("refusing to start unauthenticated Web UI on public address %q; bind to 127.0.0.1 or set RALLY_WEB_TOKEN", addr)
+	}
+	if s.authToken != "" {
+		handler = s.authMiddleware(handler)
+	}
+
+	s.srv = &http.Server{Addr: addr, Handler: handler}
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -87,6 +99,9 @@ func (s *Server) Start(addr string) error {
 	}
 
 	log.Printf("Web UI listening on http://%s", listener.Addr().String())
+	if s.authToken == "" {
+		log.Printf("Web UI auth disabled; keep it bound to localhost")
+	}
 	go s.srv.Serve(listener)
 	return nil
 }
@@ -95,6 +110,52 @@ func (s *Server) Stop() {
 	if s.srv != nil {
 		s.srv.Close()
 	}
+}
+
+func isPublicAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return true
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return true
+	}
+	if host == "localhost" {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return true
+	}
+	return !ip.IsLoopback()
+}
+
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := authTokenFromRequest(r)
+		if subtle.ConstantTimeCompare([]byte(token), []byte(s.authToken)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="rally"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func authTokenFromRequest(r *http.Request) string {
+	if token := r.Header.Get("X-Rally-Token"); token != "" {
+		return token
+	}
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		return strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+	}
+	if _, password, ok := r.BasicAuth(); ok {
+		return password
+	}
+	if cookie, err := r.Cookie("rally_token"); err == nil {
+		return cookie.Value
+	}
+	return ""
 }
 
 // ─── Static ─────────────────────────────────────────────────────────────────
@@ -225,7 +286,7 @@ func (s *Server) putConfigRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.WriteFile(s.configPath, data, 0644); err != nil {
+	if err := config.SaveBytes(s.configPath, data); err != nil {
 		http.Error(w, "Write error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

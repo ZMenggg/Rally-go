@@ -93,7 +93,7 @@ func (a *App) printUsage() error {
 
 Usage:
   rally run [--config rally.yaml] [--web [addr]]   Start the proxy server
-  rally web [--config rally.yaml] [--addr :9090]    Start Web UI only (config management)
+  rally web [--config rally.yaml] [--addr 127.0.0.1:9090] Start Web UI only
   rally check [--config rally.yaml]                  Validate configuration
   rally list [--config rally.yaml]                   List backends and health
   rally reload [--config rally.yaml]                 Reload configuration (sends SIGHUP)
@@ -134,7 +134,7 @@ func (a *App) runServer(args []string) error {
 	if webAddr, ok := flags["web"]; ok {
 		addr := webAddr
 		if addr == "true" {
-			addr = ":9090"
+			addr = "127.0.0.1:9090"
 		}
 		ws = web.New(cfg, configPath)
 		if err := ws.Start(addr); err != nil {
@@ -175,18 +175,21 @@ func (a *App) runServer(args []string) error {
 		}
 	}()
 
-	// Build name→VPS map for status enrichment
-	nameToVPS := make(map[string]config.VPS)
-	for _, v := range cfg.VPS {
-		nameToVPS[v.Name] = v
-	}
-
 	// Pass real status to Web UI
 	if ws != nil {
 		ws.SetStatusFn(func() []web.BackendStatus {
 			b := r.Balancer()
 			if b == nil {
 				return nil
+			}
+			currentCfg, err := config.Load(configPath)
+			if err != nil {
+				logger.Warn("status config refresh failed: %v", err)
+				currentCfg = cfg
+			}
+			nameToVPS := make(map[string]config.VPS)
+			for _, v := range currentCfg.VPS {
+				nameToVPS[v.Name] = v
 			}
 			info := b.Info()
 			var out []web.BackendStatus
@@ -246,7 +249,7 @@ func (a *App) runWeb(args []string) error {
 		return fmt.Errorf("init logger: %w", err)
 	}
 
-	addr := ":9090"
+	addr := "127.0.0.1:9090"
 	for i, arg := range args {
 		if arg == "--addr" && i+1 < len(args) {
 			addr = args[i+1]

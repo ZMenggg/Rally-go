@@ -6,20 +6,22 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/ZMenggg/Rally-go/internal/logger"
 )
 
 const (
-	socksVer5           = 0x05
-	socksCmdConnect     = 0x01
-	socksAtypIPv4       = 0x01
-	socksAtypDomain     = 0x03
-	socksAtypIPv6       = 0x04
-	socksRepSuccess     = 0x00
-	socksRepFailure     = 0x01
-	socksRepNotAllowed  = 0x02
-	socksRepUnreachable = 0x04
+	socksVer5             = 0x05
+	socksCmdConnect       = 0x01
+	socksAtypIPv4         = 0x01
+	socksAtypDomain       = 0x03
+	socksAtypIPv6         = 0x04
+	socksRepSuccess       = 0x00
+	socksRepFailure       = 0x01
+	socksRepNotAllowed    = 0x02
+	socksRepUnreachable   = 0x04
+	socksHandshakeTimeout = 10 * time.Second
 )
 
 // SOCKS5Proxy handles a single SOCKS5 connection.
@@ -31,10 +33,16 @@ type SOCKS5Proxy struct {
 func (p *SOCKS5Proxy) Handle(client net.Conn) {
 	defer client.Close()
 
+	if err := client.SetDeadline(time.Now().Add(socksHandshakeTimeout)); err != nil {
+		logger.Debug("socks5 set deadline: %v", err)
+	}
 	targetAddr, err := p.negotiate(client)
 	if err != nil {
 		logger.Debug("socks5 negotiate: %v", err)
 		return
+	}
+	if err := client.SetDeadline(time.Time{}); err != nil {
+		logger.Debug("socks5 clear deadline: %v", err)
 	}
 
 	remote, err := p.Dial(targetAddr)

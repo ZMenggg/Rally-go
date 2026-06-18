@@ -71,13 +71,15 @@ vps:
 # 裸机
 rally run -c rally.yaml
 
-# 同时启动 Web 管理界面（默认 :9090）
+# 同时启动 Web 管理界面（默认 127.0.0.1:9090）
 rally run -c rally.yaml --web
 
-# Docker
+# Docker（公开 Web UI 时必须设置 RALLY_WEB_TOKEN）
 docker run -d -p 1080:1080 -p 9090:9090 \
+  -e RALLY_WEB_TOKEN="change-me" \
   -v ./rally.yaml:/etc/rally.yaml \
-  ghcr.io/zmenggg/rally-go:latest
+  ghcr.io/zmenggg/rally-go:latest \
+  run -c /etc/rally.yaml --web :9090
 ```
 
 ### 3. 使用
@@ -87,6 +89,10 @@ curl -x socks5://127.0.0.1:1080 https://www.youtube.com/watch?v=...
 ```
 
 打开 http://localhost:9090 查看 Web 管理界面。
+
+Web UI 默认只监听本机地址。若需要监听 `:9090` 或其他公网地址，请设置
+`RALLY_WEB_TOKEN`，访问时使用 Basic Auth（用户名任意，密码为 token）或
+`Authorization: Bearer <token>`。
 
 ## 配置参考
 

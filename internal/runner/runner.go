@@ -45,6 +45,12 @@ func (r *Runner) Run() error {
 	r.done = make(chan struct{})
 	r.cancel = make(chan struct{})
 	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.running = false
+		r.mu.Unlock()
+		close(r.done)
+	}()
 
 	backends, err := r.buildBackends()
 	if err != nil {
@@ -84,11 +90,6 @@ func (r *Runner) Run() error {
 	r.cleanup = append(r.cleanup, func() { hc.Stop() })
 
 	err = fwd.Serve(r.cfg.Bind)
-
-	r.mu.Lock()
-	r.running = false
-	r.mu.Unlock()
-	close(r.done)
 	return err
 }
 
@@ -329,6 +330,7 @@ type healthChecker struct {
 	mu          sync.Mutex
 	stopCh      chan struct{}
 	started     bool
+	stopOnce    sync.Once
 }
 
 func newHealthChecker(backends []*balancer.Backend, b *balancer.Balancer, interval time.Duration, maxFails int) *healthChecker {
@@ -369,9 +371,9 @@ func (hc *healthChecker) Start() {
 }
 
 func (hc *healthChecker) Stop() {
-	if hc.stopCh != nil {
+	hc.stopOnce.Do(func() {
 		close(hc.stopCh)
-	}
+	})
 }
 
 func (hc *healthChecker) checkAll() {

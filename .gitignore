@@ -1,5 +1,6 @@
 /rally
 /tmp
+/.gocache
 /rally-*
 *.exe
 *.test
