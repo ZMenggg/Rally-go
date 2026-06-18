@@ -38,6 +38,17 @@ func TestStartRejectsPublicAddrWithoutToken(t *testing.T) {
 	}
 }
 
+func TestStartConfiguresHTTPTimeouts(t *testing.T) {
+	srv := newHTTPServer("127.0.0.1:0", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	if srv.ReadTimeout != webReadTimeout {
+		t.Fatalf("ReadTimeout = %v, want %v", srv.ReadTimeout, webReadTimeout)
+	}
+	if srv.IdleTimeout != webIdleTimeout {
+		t.Fatalf("IdleTimeout = %v, want %v", srv.IdleTimeout, webIdleTimeout)
+	}
+}
+
 func TestAuthMiddlewareAcceptsBasicPassword(t *testing.T) {
 	s := New(&config.Config{}, "")
 	s.authToken = "secret"
@@ -72,7 +83,7 @@ func TestMergeMaskedSecretsKeepsExistingPassword(t *testing.T) {
 	}
 }
 
-func TestMergeMaskedSecretsKeepsPasswordWhenNodeRenamed(t *testing.T) {
+func TestMergeMaskedSecretsDoesNotCopyPasswordByIndex(t *testing.T) {
 	oldCfg := &config.Config{VPS: []config.VPS{{
 		Name:     "old-name",
 		Password: "supersecret",
@@ -83,8 +94,8 @@ func TestMergeMaskedSecretsKeepsPasswordWhenNodeRenamed(t *testing.T) {
 
 	mergeMaskedSecrets(next, oldCfg)
 
-	if got := next.VPS[0].Password; got != "supersecret" {
-		t.Fatalf("password = %q, want original", got)
+	if got := next.VPS[0].Password; got != "" {
+		t.Fatalf("password = %q, want empty", got)
 	}
 }
 
@@ -102,6 +113,24 @@ func TestCheckWriteRequestAcceptsSameOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9090/api/reload", nil)
 	req.Host = "127.0.0.1:9090"
 	req.Header.Set("Origin", "http://127.0.0.1:9090")
+
+	if err := checkWriteRequest(req); err != nil {
+		t.Fatalf("checkWriteRequest error = %v", err)
+	}
+}
+
+func TestCheckWriteRequestRejectsBasicAuthWithoutOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9090/api/reload", nil)
+	req.SetBasicAuth("rally", "secret")
+
+	if err := checkWriteRequest(req); err == nil {
+		t.Fatal("checkWriteRequest accepted Basic auth write without origin")
+	}
+}
+
+func TestCheckWriteRequestAcceptsBearerWithoutOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9090/api/reload", nil)
+	req.Header.Set("Authorization", "Bearer secret")
 
 	if err := checkWriteRequest(req); err != nil {
 		t.Fatalf("checkWriteRequest error = %v", err)

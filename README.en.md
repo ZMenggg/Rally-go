@@ -105,6 +105,11 @@ log:
   level: info              # debug | info | warn | error
   output: ""               # log file path (empty = stderr)
 
+health:
+  target: www.gstatic.com:443  # Health check target host:port
+  interval: 30                 # Health check interval seconds (default 30)
+  max_fails: 2                 # Mark offline after consecutive failures (default 2)
+
 vps:
   - name: my-node          # Node name
     type: hysteria2        # Protocol: hysteria2 / socks5 / ss / trojan / vless
@@ -117,19 +122,29 @@ vps:
     # Insecure TLS (Hysteria2 self-signed certs)
     insecure: false        # Skip TLS verification (default false)
 
-    # Health check
-    health_timeout: 15     # Health check timeout (seconds, default 15)
-
     # Shadowsocks specific
     cipher: AEAD_CHACHA20_POLY1305
 
-    # VLESS specific (basic TCP only; flow/XTLS is not supported)
+    # VLESS specific
     uuid: "..."            # UUID
+    network: tcp           # tcp/raw/ws/grpc/xhttp; default tcp
+    security: reality      # none/tls/reality; default none
+    flow: xtls-rprx-vision # optional; enables Xray-backed VLESS
+    fingerprint: chrome    # TLS/REALITY uTLS fingerprint
+    public_key: "..."      # REALITY publicKey
+    short_id: "..."        # REALITY shortId
+    spider_x: "/"          # REALITY spiderX
+    xray_path: xray        # optional; RALLY_XRAY_PATH also works
 
     # Hysteria2 specific
     down_mbps: 500         # Downlink bandwidth (Mbps)
     up_mbps: 50            # Uplink bandwidth (Mbps)
 ```
+
+Advanced VLESS modes (REALITY, TLS fingerprints, XTLS flow, WebSocket, gRPC,
+XHTTP) are delegated to a local `xray` subprocess while Rally still handles
+aggregation, health checks, and traffic stats. Install `xray` in PATH, or set
+`RALLY_XRAY_PATH` / `xray_path` before enabling those fields.
 
 ## CLI Commands
 

@@ -13,7 +13,7 @@ const I18N = {zh: {
     addNodeTitle:'添加节点', editNodeTitle:'编辑节点',
     nameLabel:'名称', typeLabel:'类型', serverLabel:'服务器',
     portLabel:'端口', passwordLabel:'密码', sniLabel:'SNI',
-    cipherLabel:'加密方式', uuidLabel:'UUID', flowLabel:'流控',
+    cipherLabel:'加密方式', uuidLabel:'UUID',
     downMbpsLabel:'下行带宽 (Mbps)', upMbpsLabel:'上行带宽 (Mbps)',
     addNodeBtn:'添加节点', editNodeBtn:'保存', cancelBtn:'取消',
     nodeUpdated:'节点已更新', nodeAdded:'节点已添加',
@@ -43,7 +43,7 @@ const I18N = {zh: {
     addNodeTitle:'Add Node', editNodeTitle:'Edit Node',
     nameLabel:'Name', typeLabel:'Type', serverLabel:'Server',
     portLabel:'Port', passwordLabel:'Password', sniLabel:'SNI',
-    cipherLabel:'Cipher', uuidLabel:'UUID', flowLabel:'Flow',
+    cipherLabel:'Cipher', uuidLabel:'UUID',
     downMbpsLabel:'Down Mbps', upMbpsLabel:'Up Mbps',
     addNodeBtn:'Add Node', editNodeBtn:'Save', cancelBtn:'Cancel',
     nodeUpdated:'Node updated', nodeAdded:'Node added',
@@ -68,7 +68,7 @@ function applyLang(lang){
   currentLang=lang;
   document.querySelectorAll('[data-i18n]').forEach(el=>el.textContent=t(el.dataset.i18n));
   const c=document.getElementById('nodeCount');
-  if(c) document.getElementById('statusBackends').innerHTML=`${t('nodesLabel')}: <span id="nodeCount">${c.textContent}</span> ${t('online')}`;
+  if(c) renderStatusBackends(c.textContent);
   localStorage.setItem('rally_lang',lang);
 }
 
@@ -119,7 +119,6 @@ function onTypeChange(){
   document.getElementById('rowSNI').style.display=(t==='hysteria2'||t==='trojan'||t==='vless')?'':'none';
   document.getElementById('rowCipher').style.display=(t==='ss')?'':'none';
   document.getElementById('rowUUID').style.display=(t==='vless')?'':'none';
-  document.getElementById('rowFlow').style.display=(t==='vless')?'':'none';
   document.getElementById('rowDownMbps').style.display=(t==='hysteria2')?'':'none';
   document.getElementById('rowUpMbps').style.display=(t==='hysteria2')?'':'none';
   document.getElementById('nodePassword').required=(t!=='vless');
@@ -144,7 +143,6 @@ function showNodeForm(index){
     document.getElementById('nodeSNI').value=n.sni||'';
     document.getElementById('nodeCipher').value=n.cipher||'AEAD_CHACHA20_POLY1305';
     document.getElementById('nodeUUID').value=n.uuid||'';
-    document.getElementById('nodeFlow').value=n.flow||'';
     document.getElementById('nodeDownMbps').value=n.down_mbps||'';
     document.getElementById('nodeUpMbps').value=n.up_mbps||'';onTypeChange();
   }
@@ -156,15 +154,27 @@ function closeNodeForm(){document.getElementById('nodeModal').style.display='non
 async function submitNode(e){
   e.preventDefault();
   const t=document.getElementById('nodeType').value;
-  const node={name:document.getElementById('nodeName').value,type:t,server:document.getElementById('nodeServer').value,port:parseInt(document.getElementById('nodePort').value)};
-  const password=document.getElementById('nodePassword').value;
-  if(t!=='vless'&&password)node.password=password;
-  if(t==='hysteria2'||t==='trojan'||t==='vless')node.sni=document.getElementById('nodeSNI').value||undefined;
-  if(t==='ss')node.cipher=document.getElementById('nodeCipher').value;
-  if(t==='vless'){node.uuid=document.getElementById('nodeUUID').value;node.flow=document.getElementById('nodeFlow').value||undefined}
-  if(t==='hysteria2'){const dm=document.getElementById('nodeDownMbps').value,um=document.getElementById('nodeUpMbps').value;if(dm)node.down_mbps=parseInt(dm);if(um)node.up_mbps=parseInt(um)}
   try{
     const cfg=await API.getConfig(),idx=document.getElementById('editIndex').value;
+    const existing=idx!==''&&cfg.vps?cfg.vps[parseInt(idx)]:null;
+    const node=existing?{...existing}:{};
+    node.name=document.getElementById('nodeName').value;
+    node.type=t;
+    node.server=document.getElementById('nodeServer').value;
+    node.port=parseInt(document.getElementById('nodePort').value);
+    const password=document.getElementById('nodePassword').value;
+    if(t!=='vless'&&password)node.password=password;
+    if(t!=='vless'&&!password&&!existing)delete node.password;
+    if(t==='hysteria2'||t==='trojan'||t==='vless')node.sni=document.getElementById('nodeSNI').value||undefined;else delete node.sni;
+    if(t==='ss')node.cipher=document.getElementById('nodeCipher').value;else delete node.cipher;
+    if(t==='vless')node.uuid=document.getElementById('nodeUUID').value;else delete node.uuid;
+    if(t==='hysteria2'){
+      const dm=document.getElementById('nodeDownMbps').value,um=document.getElementById('nodeUpMbps').value;
+      if(dm)node.down_mbps=parseInt(dm);else delete node.down_mbps;
+      if(um)node.up_mbps=parseInt(um);else delete node.up_mbps;
+    }else{
+      delete node.down_mbps;delete node.up_mbps;
+    }
     if(idx!=='')cfg.vps[parseInt(idx)]=node;else{cfg.vps=cfg.vps||[];cfg.vps.push(node)}
     await API.saveConfig(cfg);configCache=cfg;
     toast(idx!==''?t('nodeUpdated'):t('nodeAdded'));closeNodeForm();loadNodes();
@@ -206,10 +216,9 @@ async function loadDashboard(){
     document.getElementById('statActive').textContent=active;
     document.getElementById('statDisabled').textContent=disabled;
     document.getElementById('nodeCount').textContent=active;
-    const nc=document.getElementById('nodeCount');
-    if(nc)document.getElementById('statusBackends').innerHTML=`${t('nodesLabel')}: <span id="nodeCount">${nc.textContent}</span> ${t('online')}`;
+    renderStatusBackends(active);
     const pe=document.getElementById('statusProxy');
-    pe.innerHTML=active>0?`● Proxy: <span class="online">${t('running')}</span>`:`● Proxy: <span class="offline">${t('stopped')}</span>`;
+    renderProxyStatus(pe, active>0);
     
     // Build name→stats map
     let statsMap={};
@@ -232,17 +241,18 @@ async function loadDashboard(){
       aggDownTotal+=downBytes;aggUpTotal+=upBytes;
       
       const tr=document.createElement('tr');
-      tr.innerHTML=`
-        <td>${esc(b.name)}</td>
-        <td><span class="tag tag-${esc(b.type||'unknown')}">${esc(b.type||'-')}</span></td>
-        <td>${esc(b.server||'-')}</td>
-        <td><span class="tag ${en&&b.connected?'tag-online':'tag-offline'}">${en&&b.connected?t('onlineStatus'):t('offlineStatus')}</span></td>
-        <td>${b.active||0}</td>
-        <td style="font-family:monospace;font-size:12px;color:var(--green)">${formatBps(downRate)}</td>
-        <td style="font-family:monospace;font-size:12px;color:var(--accent)">${formatBytes(downBytes)}</td>
-        <td><label class="switch"><input type="checkbox" ${en?'checked':''}><span class="slider"></span></label></td>
-      `;
-      const input=tr.querySelector('input[type="checkbox"]');
+      appendTextCell(tr,b.name);
+      appendTagCell(tr,b.type||'-',`tag-${safeClass(b.type||'unknown')}`);
+      appendTextCell(tr,b.server||'-');
+      appendTagCell(tr,en&&b.connected?t('onlineStatus'):t('offlineStatus'),en&&b.connected?'tag-online':'tag-offline');
+      appendTextCell(tr,b.active||0);
+      appendTextCell(tr,formatBps(downRate),'mono green');
+      appendTextCell(tr,formatBytes(downBytes),'mono accent');
+      const toggleCell=document.createElement('td');
+      const label=document.createElement('label');label.className='switch';
+      const input=document.createElement('input');input.type='checkbox';input.checked=en;
+      const slider=document.createElement('span');slider.className='slider';
+      label.append(input,slider);toggleCell.appendChild(label);tr.appendChild(toggleCell);
       input.addEventListener('change',()=>toggleNode(b.name,input.checked));
       tb.appendChild(tr);
     });
@@ -264,8 +274,17 @@ async function loadNodes(){
     vps.forEach((n,i)=>{
       const tr=document.createElement('tr');
       let pw=n.password||"";const pwDisplay=pw?pw.slice(0,1)+"••••"+pw.slice(-1):"";
-      tr.innerHTML=`<td><strong>${esc(n.name)}</strong></td><td><span class="tag tag-${esc(n.type||'hysteria2')}">${esc(n.type||'hysteria2')}</span></td><td>${esc(n.server)}</td><td>${n.port}</td><td style="font-family:monospace;font-size:12px;color:var(--text2)">${esc(pwDisplay)}</td><td><button class="btn-icon" type="button">${t('edit')}</button><button class="btn-icon btn-danger" type="button">${t('delete')}</button></td>`;
-      const [editBtn,deleteBtn]=tr.querySelectorAll('button');
+      const nameTd=document.createElement('td');
+      const strong=document.createElement('strong');strong.textContent=n.name||'';
+      nameTd.appendChild(strong);tr.appendChild(nameTd);
+      appendTagCell(tr,n.type||'hysteria2',`tag-${safeClass(n.type||'hysteria2')}`);
+      appendTextCell(tr,n.server||'');
+      appendTextCell(tr,n.port||'');
+      appendTextCell(tr,pwDisplay,'mono muted');
+      const actions=document.createElement('td');
+      const editBtn=document.createElement('button');editBtn.className='btn-icon';editBtn.type='button';editBtn.textContent=t('edit');
+      const deleteBtn=document.createElement('button');deleteBtn.className='btn-icon btn-danger';deleteBtn.type='button';deleteBtn.textContent=t('delete');
+      actions.append(editBtn,deleteBtn);tr.appendChild(actions);
       editBtn.addEventListener('click',()=>showNodeForm(i));
       deleteBtn.addEventListener('click',()=>deleteNode(i));
       tb.appendChild(tr);
@@ -286,7 +305,10 @@ async function loadLogs(){
 
 function appendLogEntry(c,e){
   const d=document.createElement('div');d.className='log-entry';
-  d.innerHTML=`<span class="log-time">${esc(e.time)}</span><span class="log-level log-level-${esc(e.level)}">${esc(e.level)}</span><span class="log-msg">${esc(e.message)}</span>`;
+  const time=document.createElement('span');time.className='log-time';time.textContent=e.time||'';
+  const level=document.createElement('span');level.className=`log-level log-level-${safeClass(e.level||'info')}`;level.textContent=e.level||'';
+  const msg=document.createElement('span');msg.className='log-msg';msg.textContent=e.message||'';
+  d.append(time,level,msg);
   c.appendChild(d);
 }
 
@@ -309,12 +331,52 @@ async function reloadConfig(){try{await API.reload();toast(t('configReloaded')+'
 function formatBps(bps){if(bps<1024)return bps.toFixed(0)+' B/s';if(bps<1048576)return(bps/1024).toFixed(1)+' KB/s';return(bps/1048576).toFixed(2)+' MB/s';}
 function formatBytes(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(2)+' GB';}
 
-function esc(s){if(s==null)return'';const d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+function renderStatusBackends(count){
+  const el=document.getElementById('statusBackends');
+  el.textContent='';
+  el.append(document.createTextNode(`${t('nodesLabel')}: `));
+  const n=document.createElement('span');n.id='nodeCount';n.textContent=count;
+  el.append(n,document.createTextNode(` ${t('online')}`));
+}
+function renderProxyStatus(el,running){
+  el.textContent='';
+  el.append(document.createTextNode('● Proxy: '));
+  const s=document.createElement('span');s.className=running?'online':'offline';s.textContent=running?t('running'):t('stopped');
+  el.appendChild(s);
+}
+function appendTextCell(tr,value,kind){
+  const td=document.createElement('td');td.textContent=value;
+  if(kind==='mono green')td.className='cell-mono cell-green';
+  if(kind==='mono accent')td.className='cell-mono cell-accent';
+  if(kind==='mono muted')td.className='cell-mono cell-muted';
+  tr.appendChild(td);
+  return td;
+}
+function appendTagCell(tr,value,extraClass){
+  const td=document.createElement('td');
+  const span=document.createElement('span');span.className=`tag ${extraClass}`;span.textContent=value;
+  td.appendChild(span);tr.appendChild(td);
+  return td;
+}
+function safeClass(s){return String(s||'').replace(/[^a-zA-Z0-9_-]/g,'-')}
 function isMaskedPassword(s){return typeof s==='string'&&(s==='****'||s.includes('****'))}
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('langSwitch').addEventListener('change',e=>switchLang(e.target.value));
+  document.getElementById('btnRefreshDashboard').addEventListener('click',loadDashboard);
+  document.getElementById('btnResetTraffic').addEventListener('click',resetTraffic);
+  document.getElementById('btnAddNode').addEventListener('click',()=>showNodeForm());
+  document.getElementById('btnRefreshNodes').addEventListener('click',loadNodes);
+  document.getElementById('btnClearLogs').addEventListener('click',clearLogs);
+  document.getElementById('btnLogStream').addEventListener('click',toggleLogStream);
+  document.getElementById('btnSaveConfig').addEventListener('click',saveConfig);
+  document.getElementById('btnReloadConfig').addEventListener('click',reloadConfig);
+  document.getElementById('btnCloseNodeModal').addEventListener('click',closeNodeForm);
+  document.getElementById('btnCancelNode').addEventListener('click',closeNodeForm);
+  document.getElementById('nodeType').addEventListener('change',onTypeChange);
+  document.getElementById('nodeForm').addEventListener('submit',submitNode);
   document.getElementById('langSwitch').value=currentLang;
   applyLang(currentLang);loadDashboard();
   setInterval(()=>{if(document.getElementById('tab-dashboard').classList.contains('active'))loadDashboard()},5000);

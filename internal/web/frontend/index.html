@@ -14,7 +14,7 @@
     <div class="status-bar">
       <span id="statusProxy">● Proxy: <span class="offline" data-i18n="stopped">Stopped</span></span>
       <span id="statusBackends"><span data-i18n="nodesLabel">Nodes</span>: <span id="nodeCount">0</span> <span data-i18n="online">online</span></span>
-      <select id="langSwitch" onchange="switchLang(this.value)" class="lang-select">
+      <select id="langSwitch" class="lang-select">
         <option value="zh">中文</option>
         <option value="en">English</option>
       </select>
@@ -47,8 +47,8 @@
       </div>
 
       <div class="toolbar">
-        <button id="btnRefreshDashboard" onclick="loadDashboard()" data-i18n="refresh">Refresh</button>
-        <button id="btnResetTraffic" onclick="resetTraffic()" style="background:var(--surface2);color:var(--orange);border:1px solid var(--border);" data-i18n="resetTraffic">Reset Traffic</button>
+        <button id="btnRefreshDashboard" data-i18n="refresh">Refresh</button>
+        <button id="btnResetTraffic" style="background:var(--surface2);color:var(--orange);border:1px solid var(--border);" data-i18n="resetTraffic">Reset Traffic</button>
       </div>
       <div class="speed-bar">
         <span><span data-i18n="downSpeed">Down</span>: <strong id="statDownRate" style="color:var(--accent)">0 B/s</strong></span>
@@ -75,8 +75,8 @@
     <!-- Nodes -->
     <section id="tab-nodes" class="tab-content">
       <div class="toolbar">
-        <button id="btnAddNode" onclick="showNodeForm()" data-i18n="addNode">+ Add Node</button>
-        <button id="btnRefreshNodes" onclick="loadNodes()" data-i18n="refresh">Refresh</button>
+        <button id="btnAddNode" data-i18n="addNode">+ Add Node</button>
+        <button id="btnRefreshNodes" data-i18n="refresh">Refresh</button>
       </div>
       <table id="nodeTable">
         <thead><tr>
@@ -93,8 +93,8 @@
 
     <section id="tab-logs" class="tab-content">
       <div class="toolbar">
-        <button onclick="clearLogs()" data-i18n="clearBtn">Clear</button>
-        <button onclick="toggleLogStream()" id="btnLogStream" data-i18n="autoScroll">Auto Scroll</button>
+        <button id="btnClearLogs" data-i18n="clearBtn">Clear</button>
+        <button id="btnLogStream" data-i18n="autoScroll">Auto Scroll</button>
       </div>
       <div class="log-container" id="logContainer">
         <div id="logContent"></div>
@@ -104,8 +104,8 @@
     <!-- Config -->
     <section id="tab-config" class="tab-content">
       <div class="toolbar">
-        <button id="btnSaveConfig" onclick="saveConfig()" data-i18n="saveConfigBtn">Save Config</button>
-        <button id="btnReloadConfig" onclick="reloadConfig()" data-i18n="reloadBtn">Reload</button>
+        <button id="btnSaveConfig" data-i18n="saveConfigBtn">Save Config</button>
+        <button id="btnReloadConfig" data-i18n="reloadBtn">Reload</button>
       </div>
       <textarea id="configEditor" spellcheck="false"></textarea>
     </section>
@@ -114,9 +114,9 @@
   <!-- Node Form Modal -->
   <div id="nodeModal" class="modal" style="display:none">
     <div class="modal-content">
-      <span class="close" onclick="closeNodeForm()">&times;</span>
+      <span id="btnCloseNodeModal" class="close">&times;</span>
       <h2 id="modalTitle" data-i18n="addNodeTitle">Add Node</h2>
-      <form id="nodeForm" onsubmit="submitNode(event)">
+      <form id="nodeForm">
         <input type="hidden" id="editIndex" value="">
         <div class="form-row">
           <label for="nodeName" data-i18n="nameLabel">Name</label>
@@ -124,7 +124,7 @@
         </div>
         <div class="form-row">
           <label for="nodeType" data-i18n="typeLabel">Type</label>
-          <select id="nodeType" onchange="onTypeChange()">
+          <select id="nodeType">
             <option value="hysteria2">Hysteria2</option>
             <option value="socks5">SOCKS5</option>
             <option value="ss">Shadowsocks</option>
@@ -160,10 +160,6 @@
           <label for="nodeUUID" data-i18n="uuidLabel">UUID</label>
           <input id="nodeUUID" placeholder="VLESS UUID">
         </div>
-        <div class="form-row" id="rowFlow" style="display:none">
-          <label for="nodeFlow" data-i18n="flowLabel">Flow</label>
-          <input id="nodeFlow" placeholder="xtls-rprx-vision">
-        </div>
         <div class="form-row" id="rowDownMbps" style="display:none">
           <label for="nodeDownMbps" data-i18n="downMbpsLabel">Down Mbps</label>
           <input id="nodeDownMbps" type="number" placeholder="e.g. 500">
@@ -174,7 +170,7 @@
         </div>
         <div class="form-actions">
           <button type="submit" id="btnSubmitNode" data-i18n="addNodeBtn">Add Node</button>
-          <button type="button" onclick="closeNodeForm()" data-i18n="cancelBtn">Cancel</button>
+          <button type="button" id="btnCancelNode" data-i18n="cancelBtn">Cancel</button>
         </div>
       </form>
     </div>

@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"net"
+	"sync"
 	"sync/atomic"
 
 	"github.com/ZMenggg/Rally-go/internal/logger"
@@ -14,6 +15,11 @@ type RetryProvider struct {
 	name     string
 	factory  func() (ConnProvider, error)
 	provider atomic.Value
+	mu       sync.Mutex
+}
+
+type closeableProvider interface {
+	Close() error
 }
 
 // NewRetryProvider creates a RetryProvider.
@@ -47,13 +53,19 @@ func (p *RetryProvider) Dial(addr string) (net.Conn, error) {
 }
 
 func (p *RetryProvider) reconnect(addr string) (net.Conn, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for i := 0; i < 3; i++ {
 		newProvider, err := p.factory()
 		if err != nil {
 			logger.Warn("%s: reconnect attempt %d failed: %v", p.name, i+1, err)
 			continue
 		}
+		old := p.provider.Load()
 		p.provider.Store(newProvider)
+		if closer, ok := old.(closeableProvider); ok {
+			_ = closer.Close()
+		}
 		logger.Info("%s: reconnected on attempt %d", p.name, i+1)
 		return newProvider.Dial(addr)
 	}

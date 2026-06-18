@@ -50,15 +50,38 @@ func TestTrojanPasswordHash(t *testing.T) {
 	}
 }
 
-func TestVLESSRejectsFlow(t *testing.T) {
-	_, err := NewVLESSProvider(
-		"node",
-		"example.com:443",
-		"550e8400-e29b-41d4-a716-446655440000",
-		"xtls-rprx-vision",
-		"example.com",
-	)
+func TestBasicVLESSRejectsFlow(t *testing.T) {
+	_, err := NewVLESSProvider("node", "example.com:443", "550e8400-e29b-41d4-a716-446655440000", "xtls-rprx-vision", "example.com")
 	if err == nil {
-		t.Fatal("NewVLESSProvider accepted unsupported flow")
+		t.Fatal("NewVLESSProvider accepted flow in basic mode")
+	}
+}
+
+func TestBuildXrayVLESSConfigReality(t *testing.T) {
+	cfg, err := buildXrayVLESSConfig(VLESSOptions{
+		Name:        "node",
+		Server:      "example.com:443",
+		UUID:        "550e8400-e29b-41d4-a716-446655440000",
+		Flow:        "xtls-rprx-vision",
+		SNI:         "www.example.com",
+		Network:     "tcp",
+		Security:    "reality",
+		Fingerprint: "chrome",
+		PublicKey:   "abc123",
+		ShortID:     "deadbeef",
+		SpiderX:     "/",
+	}, "127.0.0.1:23456")
+	if err != nil {
+		t.Fatalf("buildXrayVLESSConfig() error = %v", err)
+	}
+	outbounds := cfg["outbounds"].([]interface{})
+	outbound := outbounds[0].(map[string]interface{})
+	stream := outbound["streamSettings"].(map[string]interface{})
+	if got := stream["security"]; got != "reality" {
+		t.Fatalf("security = %v, want reality", got)
+	}
+	reality := stream["realitySettings"].(map[string]interface{})
+	if got := reality["publicKey"]; got != "abc123" {
+		t.Fatalf("publicKey = %v, want abc123", got)
 	}
 }

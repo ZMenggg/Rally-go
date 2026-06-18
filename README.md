@@ -104,6 +104,11 @@ log:
   level: info              # debug | info | warn | error
   output: ""               # 日志文件路径(空=stderr)
 
+health:
+  target: www.gstatic.com:443  # 健康检查目标 host:port
+  interval: 30                 # 健康检查间隔秒数（默认 30）
+  max_fails: 2                 # 连续失败次数后标记离线（默认 2）
+
 vps:
   - name: my-node          # 节点名称
     type: hysteria2        # 协议: hysteria2 / socks5 / ss / trojan / vless
@@ -116,19 +121,28 @@ vps:
     # 不安全 TLS（Hysteria2 自签名证书场景）
     insecure: false        # 跳过 TLS 证书验证（默认 false）
 
-    # 健康检查
-    health_timeout: 15     # 健康检查超时秒数（默认 15）
-
     # Shadowsocks 专用
     cipher: AEAD_CHACHA20_POLY1305  # 加密方式
 
-    # VLESS 专用（仅支持 basic TCP；不支持 flow/XTLS）
+    # VLESS 专用
     uuid: "..."            # UUID
+    network: tcp           # tcp/raw/ws/grpc/xhttp；默认 tcp
+    security: reality      # none/tls/reality；默认 none
+    flow: xtls-rprx-vision # 可选，设置后使用 Xray-backed VLESS
+    fingerprint: chrome    # TLS/REALITY uTLS 指纹
+    public_key: "..."      # REALITY publicKey
+    short_id: "..."        # REALITY shortId
+    spider_x: "/"          # REALITY spiderX
+    xray_path: xray        # 可选，也可用 RALLY_XRAY_PATH 指定
 
     # Hysteria2 专用
     down_mbps: 500         # 下行带宽
     up_mbps: 50            # 上行带宽
 ```
+
+高级 VLESS（REALITY、TLS 指纹、XTLS flow、WebSocket、gRPC、XHTTP）会自动通过
+本机 `xray` 子进程实现，Rally 继续负责聚合、健康检查和统计。使用这些字段前请
+确保系统 PATH 中有 `xray`，或设置 `RALLY_XRAY_PATH` / `xray_path`。
 
 ## CLI 命令
 

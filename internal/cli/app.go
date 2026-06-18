@@ -148,13 +148,12 @@ func (a *App) runServer(args []string) error {
 	// Handle SIGHUP for hot reload
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGHUP)
-	// Write PID file
-	os.WriteFile("/tmp/rally.pid", []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	writePIDFile("/tmp/rally.pid")
 
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error("SIGHUP handler paniced: %v", r)
+				logger.Error("SIGHUP handler panicked: %v", r)
 			}
 		}()
 		for range sigCh {
@@ -265,8 +264,7 @@ func (a *App) runWeb(args []string) error {
 	// Handle SIGHUP
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGHUP)
-	// Write PID file
-	os.WriteFile("/tmp/rally.pid", []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	writePIDFile("/tmp/rally.pid")
 	go func() {
 		for range sigCh {
 			logger.Info("Received SIGHUP, reloading config...")
@@ -281,6 +279,12 @@ func (a *App) runWeb(args []string) error {
 	}()
 
 	select {}
+}
+
+func writePIDFile(path string) {
+	if err := os.WriteFile(path, []byte(fmt.Sprintf("%d", os.Getpid())), 0600); err != nil {
+		logger.Warn("write PID file failed: %v", err)
+	}
 }
 
 // ─── check ───────────────────────────────────────────────────────────────────

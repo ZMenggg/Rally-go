@@ -83,6 +83,10 @@ thead th {
 }
 tbody td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
 tbody tr:hover { background: var(--surface); }
+.cell-mono { font-family: monospace; font-size: 12px; }
+.cell-green { color: var(--green); }
+.cell-accent { color: var(--accent); }
+.cell-muted { color: var(--text2); }
 
 td .tag {
   display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;

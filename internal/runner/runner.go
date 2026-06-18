@@ -87,7 +87,19 @@ func (r *Runner) Run() error {
 		len(backends), r.cfg.Bind)
 
 	// Start health checker (periodically tests each backend)
-	hc := newHealthChecker(b.Backends(), b, 30*time.Second, 2)
+	healthTarget := r.cfg.Health.Target
+	if healthTarget == "" {
+		healthTarget = "www.gstatic.com:443"
+	}
+	healthInterval := 30 * time.Second
+	if r.cfg.Health.Interval > 0 {
+		healthInterval = time.Duration(r.cfg.Health.Interval) * time.Second
+	}
+	healthMaxFails := 2
+	if r.cfg.Health.MaxFails > 0 {
+		healthMaxFails = r.cfg.Health.MaxFails
+	}
+	hc := newHealthChecker(b.Backends(), b, healthInterval, healthMaxFails, healthTarget)
 	hc.Start()
 	r.cleanup = append(r.cleanup, func() { hc.Stop() })
 
@@ -201,7 +213,11 @@ func (r *Runner) buildBackends() ([]*balancer.Backend, error) {
 			// Initial connection failed — schedule immediate retry
 			go func() {
 				logger.Info("%s: initial connection failed, retrying...", rp.Name())
-				rp.Dial("8.8.8.8:53") // trigger reconnect in background
+				target := r.cfg.Health.Target
+				if target == "" {
+					target = "www.gstatic.com:443"
+				}
+				rp.Dial(target) // trigger reconnect in background
 			}()
 		}
 
@@ -322,7 +338,35 @@ func (r *Runner) startTrojan(vps config.VPS) proxy.ConnProvider {
 func (r *Runner) startVLESS(vps config.VPS) (proxy.ConnProvider, error) {
 	server := net.JoinHostPort(vps.Server, strconv.Itoa(vps.Port))
 	logger.Info("starting VLESS client for %s (%s)", vps.Name, server)
-	return proxy.NewVLESSProvider(vps.Name, server, vps.UUID, vps.Flow, vps.SNI)
+	if vps.UsesXrayVLESS() {
+		provider, err := proxy.NewXrayVLESSProvider(proxy.VLESSOptions{
+			Name:        vps.Name,
+			Server:      server,
+			UUID:        vps.UUID,
+			Flow:        vps.Flow,
+			SNI:         vps.SNI,
+			Network:     vps.Network,
+			Security:    vps.Security,
+			Fingerprint: vps.Fingerprint,
+			PublicKey:   vps.PublicKey,
+			ShortID:     vps.ShortID,
+			SpiderX:     vps.SpiderX,
+			ALPN:        vps.ALPN,
+			Path:        vps.Path,
+			Host:        vps.Host,
+			ServiceName: vps.ServiceName,
+			Mode:        vps.Mode,
+			XrayPath:    vps.XrayPath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		r.mu.Lock()
+		r.cleanup = append(r.cleanup, func() { _ = provider.Close() })
+		r.mu.Unlock()
+		return provider, nil
+	}
+	return proxy.NewVLESSProvider(vps.Name, server, vps.UUID, "", vps.SNI)
 }
 
 // ─── Health Checker ──────────────────────────────────────────────────────────
@@ -342,13 +386,13 @@ type healthChecker struct {
 	stopOnce    sync.Once
 }
 
-func newHealthChecker(backends []*balancer.Backend, b *balancer.Balancer, interval time.Duration, maxFails int) *healthChecker {
+func newHealthChecker(backends []*balancer.Backend, b *balancer.Balancer, interval time.Duration, maxFails int, target string) *healthChecker {
 	return &healthChecker{
 		backends:    backends,
 		balancer:    b,
 		interval:    interval,
 		maxFails:    maxFails,
-		target:      "www.gstatic.com:443",
+		target:      target,
 		consecutive: make(map[string]int),
 		stopCh:      make(chan struct{}),
 	}

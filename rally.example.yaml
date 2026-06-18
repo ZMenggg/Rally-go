@@ -5,6 +5,11 @@ log:
   level: info
   output: ""
 
+health:
+  target: www.gstatic.com:443
+  interval: 30
+  max_fails: 2
+
 vps:
   - name: vps-1
     type: hysteria2
@@ -27,3 +32,19 @@ vps:
     up_mbps: 50
     enabled: true
     insecure: true
+
+  # Advanced VLESS requires xray in PATH, or set RALLY_XRAY_PATH/xray_path.
+  # - name: vless-reality
+  #   type: vless
+  #   server: vless.example.com
+  #   port: 443
+  #   uuid: "550e8400-e29b-41d4-a716-446655440000"
+  #   network: tcp
+  #   security: reality
+  #   flow: xtls-rprx-vision
+  #   sni: www.example.com
+  #   fingerprint: chrome
+  #   public_key: "your-reality-public-key"
+  #   short_id: "your-short-id"
+  #   spider_x: "/"
+  #   enabled: true

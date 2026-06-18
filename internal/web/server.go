@@ -22,7 +22,12 @@ import (
 	"time"
 )
 
-const maxConfigBodyBytes = 1 << 20
+const (
+	maxConfigBodyBytes = 1 << 20
+	webReadTimeout     = 15 * time.Second
+	webWriteTimeout    = 0
+	webIdleTimeout     = 60 * time.Second
+)
 
 //go:embed frontend/index.html frontend/style.css frontend/app.js
 var frontendFS embed.FS
@@ -95,7 +100,7 @@ func (s *Server) Start(addr string) error {
 		handler = s.authMiddleware(handler)
 	}
 
-	s.srv = &http.Server{Addr: addr, Handler: handler}
+	s.srv = newHTTPServer(addr, handler)
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -106,8 +111,22 @@ func (s *Server) Start(addr string) error {
 	if s.authToken == "" {
 		log.Printf("Web UI auth disabled; keep it bound to localhost")
 	}
-	go s.srv.Serve(listener)
+	go func() {
+		if err := s.srv.Serve(listener); err != nil && err != http.ErrServerClosed {
+			logger.Error("Web UI server stopped: %v", err)
+		}
+	}()
 	return nil
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:         addr,
+		Handler:      handler,
+		ReadTimeout:  webReadTimeout,
+		WriteTimeout: webWriteTimeout,
+		IdleTimeout:  webIdleTimeout,
+	}
 }
 
 func (s *Server) Stop() {
@@ -171,6 +190,15 @@ func checkWriteRequest(r *http.Request) error {
 	}
 	origin := r.Header.Get("Origin")
 	if origin == "" {
+		if bearerOrHeaderToken(r) {
+			return nil
+		}
+		if r.Header.Get("Sec-Fetch-Site") == "same-origin" || r.Header.Get("Sec-Fetch-Site") == "none" {
+			return nil
+		}
+		if hasBrowserAuth(r) {
+			return fmt.Errorf("write requests with browser credentials require a same-origin Origin or Sec-Fetch-Site header")
+		}
 		return nil
 	}
 	originURL, err := url.Parse(origin)
@@ -181,6 +209,21 @@ func checkWriteRequest(r *http.Request) error {
 		return fmt.Errorf("origin %q is not allowed", origin)
 	}
 	return nil
+}
+
+func bearerOrHeaderToken(r *http.Request) bool {
+	if r.Header.Get("X-Rally-Token") != "" {
+		return true
+	}
+	return strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ")
+}
+
+func hasBrowserAuth(r *http.Request) bool {
+	if _, _, ok := r.BasicAuth(); ok {
+		return true
+	}
+	_, err := r.Cookie("rally_token")
+	return err == nil
 }
 
 func sameHost(a, b string) bool {
@@ -281,6 +324,11 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	mergeMaskedSecrets(&cfg, s.cfg)
 	s.mu.Unlock()
+
+	if err := config.Validate(&cfg); err != nil {
+		http.Error(w, "Invalid config: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	if err := config.Save(s.configPath, &cfg); err != nil {
 		http.Error(w, "Save error: "+err.Error(), http.StatusInternalServerError)
@@ -634,10 +682,6 @@ func mergeMaskedSecrets(next, prev *config.Config) {
 	}
 	for i := range next.VPS {
 		old, ok := oldByName[next.VPS[i].Name]
-		if !ok && i < len(prev.VPS) {
-			old = prev.VPS[i]
-			ok = true
-		}
 		if !ok {
 			continue
 		}

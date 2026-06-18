@@ -5,11 +5,16 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	sscore "github.com/shadowsocks/go-shadowsocks2/core"
@@ -373,6 +378,26 @@ type VLESSProvider struct {
 	sni    string
 }
 
+type VLESSOptions struct {
+	Name        string
+	Server      string
+	UUID        string
+	Flow        string
+	SNI         string
+	Network     string
+	Security    string
+	Fingerprint string
+	PublicKey   string
+	ShortID     string
+	SpiderX     string
+	ALPN        []string
+	Path        string
+	Host        string
+	ServiceName string
+	Mode        string
+	XrayPath    string
+}
+
 // NewVLESSProvider creates a new VLESSProvider.
 func NewVLESSProvider(name, server, uuid, flow, sni string) (*VLESSProvider, error) {
 	if flow != "" {
@@ -469,6 +494,252 @@ func (p *VLESSProvider) Dial(addr string) (net.Conn, error) {
 	}
 
 	return conn, nil
+}
+
+// XrayVLESSProvider delegates advanced VLESS transports/security (TLS,
+// REALITY, XTLS flow, WebSocket, gRPC, XHTTP) to xray-core and exposes it as a
+// local SOCKS5 provider to Rally.
+type XrayVLESSProvider struct {
+	name      string
+	cmd       *exec.Cmd
+	configDir string
+	socks     *SOCKS5Provider
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func NewXrayVLESSProvider(opts VLESSOptions) (*XrayVLESSProvider, error) {
+	xrayPath := opts.XrayPath
+	if xrayPath == "" {
+		xrayPath = os.Getenv("RALLY_XRAY_PATH")
+	}
+	if xrayPath == "" {
+		xrayPath = "xray"
+	}
+	if _, err := exec.LookPath(xrayPath); err != nil {
+		return nil, fmt.Errorf("find xray binary %q: %w", xrayPath, err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("allocate local xray socks port: %w", err)
+	}
+	socksAddr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		return nil, fmt.Errorf("close temporary xray listener: %w", err)
+	}
+
+	dir, err := os.MkdirTemp("", "rally-xray-*")
+	if err != nil {
+		return nil, fmt.Errorf("create xray config dir: %w", err)
+	}
+	cfg, err := buildXrayVLESSConfig(opts, socksAddr)
+	if err != nil {
+		os.RemoveAll(dir)
+		return nil, err
+	}
+	configPath := filepath.Join(dir, "config.json")
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("marshal xray config: %w", err)
+	}
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("write xray config: %w", err)
+	}
+
+	cmd := exec.Command(xrayPath, "run", "-config", configPath)
+	if err := cmd.Start(); err != nil {
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("start xray: %w", err)
+	}
+
+	p := &XrayVLESSProvider{
+		name:      opts.Name,
+		cmd:       cmd,
+		configDir: dir,
+		socks:     NewSOCKS5Provider(opts.Name, socksAddr),
+		done:      make(chan struct{}),
+	}
+	go p.reap()
+	if err := waitForTCP(socksAddr, providerHandshakeTimeout); err != nil {
+		p.Close()
+		return nil, fmt.Errorf("xray local socks not ready: %w", err)
+	}
+	return p, nil
+}
+
+func (p *XrayVLESSProvider) Name() string { return p.name }
+
+func (p *XrayVLESSProvider) Dial(addr string) (net.Conn, error) {
+	return p.socks.Dial(addr)
+}
+
+func (p *XrayVLESSProvider) Close() error {
+	var err error
+	p.closeOnce.Do(func() {
+		if p.cmd != nil && p.cmd.Process != nil {
+			_ = p.cmd.Process.Kill()
+			<-p.done
+		}
+		if p.configDir != "" {
+			err = os.RemoveAll(p.configDir)
+		}
+	})
+	return err
+}
+
+func (p *XrayVLESSProvider) reap() {
+	_ = p.cmd.Wait()
+	close(p.done)
+}
+
+func buildXrayVLESSConfig(opts VLESSOptions, socksAddr string) (map[string]interface{}, error) {
+	host, portStr, err := net.SplitHostPort(opts.Server)
+	if err != nil {
+		return nil, fmt.Errorf("split vless server: %w", err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		return nil, fmt.Errorf("invalid vless server port %q", portStr)
+	}
+	socksHost, socksPortStr, err := net.SplitHostPort(socksAddr)
+	if err != nil {
+		return nil, fmt.Errorf("split local xray socks address: %w", err)
+	}
+	socksPort, err := strconv.Atoi(socksPortStr)
+	if err != nil {
+		return nil, fmt.Errorf("parse local xray socks port: %w", err)
+	}
+
+	network := strings.ToLower(opts.Network)
+	if network == "" {
+		network = "tcp"
+	}
+	if network == "raw" {
+		network = "tcp"
+	}
+	security := strings.ToLower(opts.Security)
+	if security == "" {
+		security = "none"
+	}
+
+	user := map[string]interface{}{
+		"id":         opts.UUID,
+		"encryption": "none",
+	}
+	if opts.Flow != "" {
+		user["flow"] = opts.Flow
+	}
+	stream := map[string]interface{}{
+		"network":  network,
+		"security": security,
+	}
+	if security == "tls" {
+		tlsSettings := map[string]interface{}{}
+		if opts.SNI != "" {
+			tlsSettings["serverName"] = opts.SNI
+		}
+		if opts.Fingerprint != "" {
+			tlsSettings["fingerprint"] = opts.Fingerprint
+		}
+		if len(opts.ALPN) > 0 {
+			tlsSettings["alpn"] = opts.ALPN
+		}
+		stream["tlsSettings"] = tlsSettings
+	}
+	if security == "reality" {
+		realitySettings := map[string]interface{}{
+			"serverName": opts.SNI,
+			"publicKey":  opts.PublicKey,
+		}
+		if opts.Fingerprint != "" {
+			realitySettings["fingerprint"] = opts.Fingerprint
+		}
+		if opts.ShortID != "" {
+			realitySettings["shortId"] = opts.ShortID
+		}
+		if opts.SpiderX != "" {
+			realitySettings["spiderX"] = opts.SpiderX
+		}
+		stream["realitySettings"] = realitySettings
+	}
+	if network == "ws" {
+		wsSettings := map[string]interface{}{}
+		if opts.Path != "" {
+			wsSettings["path"] = opts.Path
+		}
+		if opts.Host != "" {
+			wsSettings["headers"] = map[string]interface{}{"Host": opts.Host}
+		}
+		stream["wsSettings"] = wsSettings
+	}
+	if network == "grpc" {
+		grpcSettings := map[string]interface{}{}
+		if opts.ServiceName != "" {
+			grpcSettings["serviceName"] = opts.ServiceName
+		}
+		if opts.Mode != "" {
+			grpcSettings["multiMode"] = opts.Mode == "multi"
+		}
+		stream["grpcSettings"] = grpcSettings
+	}
+	if network == "xhttp" {
+		xhttpSettings := map[string]interface{}{}
+		if opts.Path != "" {
+			xhttpSettings["path"] = opts.Path
+		}
+		if opts.Host != "" {
+			xhttpSettings["host"] = opts.Host
+		}
+		if opts.Mode != "" {
+			xhttpSettings["mode"] = opts.Mode
+		}
+		stream["xhttpSettings"] = xhttpSettings
+	}
+
+	return map[string]interface{}{
+		"log": map[string]interface{}{"loglevel": "warning"},
+		"inbounds": []interface{}{
+			map[string]interface{}{
+				"listen":   socksHost,
+				"port":     socksPort,
+				"protocol": "socks",
+				"settings": map[string]interface{}{"udp": false},
+			},
+		},
+		"outbounds": []interface{}{
+			map[string]interface{}{
+				"protocol": "vless",
+				"settings": map[string]interface{}{
+					"vnext": []interface{}{
+						map[string]interface{}{
+							"address": host,
+							"port":    port,
+							"users":   []interface{}{user},
+						},
+					},
+				},
+				"streamSettings": stream,
+			},
+		},
+	}, nil
+}
+
+func waitForTCP(addr string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // parseUUID parses a UUID string like "550e8400-e29b-41d4-a716-446655440000"
